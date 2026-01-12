@@ -54,6 +54,11 @@ hypre_CSRMatrixCreate( HYPRE_Int num_rows,
    hypre_CSRMatrixPrecision(matrix) = HYPRE_OBJECT_PRECISION;
 #endif
 
+   matrix->tiled_data = NULL;
+   matrix->tiled_j    = NULL;
+   // matrix->is_tiled   = 0; 
+   // matrix->tiled_width = 0;
+
    return matrix;
 }
 
@@ -78,6 +83,18 @@ hypre_CSRMatrixDestroy( hypre_CSRMatrix *matrix )
          /* RL: TODO There might be cases BigJ cannot be freed FIXME
           * Not so clear how to do it */
          hypre_TFree(hypre_CSRMatrixBigJ(matrix), memory_location);
+
+         if (matrix->tiled_data)
+         {
+            hypre_TFree(matrix->tiled_data, memory_location);
+            matrix->tiled_data = NULL;
+         }
+         if (matrix->tiled_j)
+         {
+            hypre_TFree(matrix->tiled_j, memory_location);
+            matrix->tiled_j = NULL;
+         }
+         // TODO: destroy remainder matrix
       }
 
 #if defined(HYPRE_USING_CUSPARSE) || defined(HYPRE_USING_ROCSPARSE) || defined(HYPRE_USING_ONEMKLSPARSE)

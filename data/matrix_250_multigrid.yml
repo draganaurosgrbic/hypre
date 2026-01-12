@@ -1,0 +1,21 @@
+general:
+  use_millisec: off
+
+linear_system:
+  matrix_filename:  /scratch/dg76/thesis_work/total/hypre-2/data/A_250
+  rhs_filename:     /scratch/dg76/thesis_work/total/hypre-2/data/b_250
+
+solver:
+  pcg:
+    max_iter: 100
+    relative_tol: 1.0e-20
+    print_level: 2
+
+preconditioner: 
+  amg:
+    print_level: 1
+    coarsening:
+      max_levels: 25
+    relaxation:
+      num_sweeps: 1
+      order: 0

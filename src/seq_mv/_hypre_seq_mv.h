@@ -83,6 +83,13 @@ typedef struct
 #if defined(HYPRE_MIXED_PRECISION)
    HYPRE_Precision matrix_precision;
 #endif
+
+   HYPRE_Complex        *tiled_data;
+   HYPRE_Int            *tiled_j;
+   // HYPRE_Int             is_tiled;
+   // HYPRE_Int             tiled_width;
+   // struct hypre_CSRMatrix_struct *remainder_matrix;
+
 } hypre_CSRMatrix;
 
 /*--------------------------------------------------------------------------

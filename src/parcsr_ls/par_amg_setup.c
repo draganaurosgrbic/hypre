@@ -21,6 +21,189 @@
  *
  *****************************************************************************/
 
+#include "_hypre_utilities.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+HYPRE_Int
+hypre_CSRMatrixTile7Point( hypre_CSRMatrix *A )
+{
+   HYPRE_Int      num_rows = hypre_CSRMatrixNumRows(A);
+   HYPRE_Int     *A_i      = hypre_CSRMatrixI(A);
+   HYPRE_Int     *A_j      = hypre_CSRMatrixJ(A);
+   HYPRE_Complex *A_data   = hypre_CSRMatrixData(A);
+
+   HYPRE_Int padded_m = ((num_rows + 7) / 8) * 8;
+   size_t total_elements = (size_t)padded_m * 7;
+
+   HYPRE_Complex *nz      = NULL;
+   HYPRE_Int     *col_ind = NULL;
+
+   if (posix_memalign((void**)&nz, 64, total_elements * sizeof(HYPRE_Complex)) != 0) {
+      return 1;
+   }
+
+   if (posix_memalign((void**)&col_ind, 64, total_elements * sizeof(HYPRE_Int)) != 0) {
+      free(nz);
+      return 1;
+   }
+
+   #pragma omp parallel for schedule(static)
+   for (HYPRE_Int b = 0; b < padded_m; b += 8) {
+      
+      for (int k = 0; k < 56; k++) {
+         nz[b * 7 + k] = 0.0;
+         col_ind[b * 7 + k] = 0; 
+      }
+
+      for (HYPRE_Int row = 0; row < 8; row++) {
+         HYPRE_Int global_row = b + row;
+         if (global_row < num_rows) {
+            HYPRE_Int row_start = A_i[global_row];
+            HYPRE_Int row_end   = A_i[global_row+1];
+            
+            for (HYPRE_Int k = 0; k < 7 && (row_start + k) < row_end; k++) {
+               nz[b * 7 + (k * 8) + row] = A_data[row_start + k];
+               col_ind[b * 7 + (k * 8) + row] = A_j[row_start + k];
+            }
+         }
+      }
+   }
+
+   A->tiled_data = nz;
+   A->tiled_j    = col_ind;
+   return hypre_error_flag;
+}
+
+HYPRE_Int
+hypre_CSRMatrixTile7Point_old( hypre_CSRMatrix *A )
+{
+   HYPRE_Int      num_rows = hypre_CSRMatrixNumRows(A);
+   HYPRE_Int     *A_i      = hypre_CSRMatrixI(A);
+   HYPRE_Int     *A_j      = hypre_CSRMatrixJ(A);
+   HYPRE_Complex *A_data   = hypre_CSRMatrixData(A);
+
+   HYPRE_Int padded_m = ((num_rows + 7) / 8) * 8;
+   size_t total_elements = (size_t)padded_m * 7;
+
+   HYPRE_Complex *nz;
+   HYPRE_Int     *col_ind;
+
+   posix_memalign((void**)&nz,      64, total_elements * sizeof(HYPRE_Complex));
+   posix_memalign((void**)&col_ind, 64, total_elements * sizeof(HYPRE_Int));
+
+   #pragma omp parallel for
+   for (HYPRE_Int i = 0; i < total_elements; i++) {
+      nz[i] = 0.0;
+      col_ind[i] = 0;
+   }
+
+   #pragma omp parallel for
+   for (HYPRE_Int b = 0; b < num_rows; b += 8) {
+      for (HYPRE_Int row = 0; row < 8; row++) {
+         HYPRE_Int global_row = b + row;
+         if (global_row < num_rows) {
+            HYPRE_Int row_start = A_i[global_row];
+            HYPRE_Int row_end   = A_i[global_row+1];
+            for (HYPRE_Int k = 0; k < 7 && (row_start + k) < row_end; k++) {
+               nz[b * 7 + (k * 8) + row] = A_data[row_start + k];
+               col_ind[b * 7 + (k * 8) + row] = A_j[row_start + k];
+            }
+         }
+      }
+   }
+
+   A->tiled_data = nz;
+   A->tiled_j    = col_ind;
+   return hypre_error_flag;
+}
+
+/*
+HYPRE_Int
+hypre_CSRMatrixTileGeneric( hypre_CSRMatrix *A, HYPRE_Int T )
+{
+   HYPRE_Int      num_rows = hypre_CSRMatrixNumRows(A);
+   HYPRE_Int     *A_i      = hypre_CSRMatrixI(A);
+   HYPRE_Int     *A_j      = hypre_CSRMatrixJ(A);
+   HYPRE_Complex *A_data   = hypre_CSRMatrixData(A);
+
+   HYPRE_Int padded_m = ((num_rows + 7) / 8) * 8;
+   size_t total_elements = (size_t)padded_m * T;
+
+   HYPRE_Complex *nz;
+   HYPRE_Int     *col_ind;
+
+   posix_memalign((void**)&nz,      64, total_elements * sizeof(HYPRE_Complex));
+   posix_memalign((void**)&col_ind, 64, total_elements * sizeof(HYPRE_Int));
+
+   #pragma omp parallel for
+   for (size_t i = 0; i < total_elements; i++) {
+      nz[i] = 0.0;
+      col_ind[i] = 0; 
+   }
+
+   HYPRE_Int *R_i = hypre_CTAlloc(HYPRE_Int, num_rows + 1, HYPRE_MEMORY_HOST);
+   HYPRE_Int total_remainder_nnz = 0;
+   
+   for (HYPRE_Int i = 0; i < num_rows; i++) {
+      HYPRE_Int row_nnz = A_i[i+1] - A_i[i];
+      R_i[i] = (row_nnz > T) ? (row_nnz - T) : 0;
+      total_remainder_nnz += R_i[i];
+   }
+
+   HYPRE_Int sum = 0;
+   for (HYPRE_Int i = 0; i < num_rows; i++) {
+      HYPRE_Int tmp = R_i[i];
+      R_i[i] = sum;
+      sum += tmp;
+   }
+   R_i[num_rows] = sum;
+
+   HYPRE_Int     *R_j    = hypre_CTAlloc(HYPRE_Int, total_remainder_nnz, HYPRE_MEMORY_HOST);
+   HYPRE_Complex *R_data = hypre_CTAlloc(HYPRE_Complex, total_remainder_nnz, HYPRE_MEMORY_HOST);
+
+   #pragma omp parallel for
+   for (HYPRE_Int b = 0; b < num_rows; b += 8) {
+      for (HYPRE_Int row = 0; row < 8; row++) {
+         HYPRE_Int global_row = b + row;
+         if (global_row < num_rows) {
+            HYPRE_Int row_start = A_i[global_row];
+            HYPRE_Int row_end   = A_i[global_row+1];
+            HYPRE_Int row_nnz   = row_end - row_start;
+            
+            HYPRE_Int limit = (row_nnz < T) ? row_nnz : T;
+            for (HYPRE_Int k = 0; k < limit; k++) {
+               nz[b * T + (k * 8) + row] = A_data[row_start + k];
+               col_ind[b * T + (k * 8) + row] = A_j[row_start + k];
+            }
+
+            if (row_nnz > T) {
+               HYPRE_Int r_offset = R_i[global_row];
+               for (HYPRE_Int k = T; k < row_nnz; k++) {
+                  R_j[r_offset + (k - T)] = A_j[row_start + k];
+                  R_data[r_offset + (k - T)] = A_data[row_start + k];
+               }
+            }
+         }
+      }
+   }
+
+   A->tiled_data  = nz;
+   A->tiled_j     = col_ind;
+   A->tiled_width = T;
+
+   hypre_CSRMatrix *remainder = hypre_CSRMatrixCreate(num_rows, hypre_CSRMatrixNumCols(A), 0);
+   hypre_CSRMatrixI(remainder)    = R_i;
+   hypre_CSRMatrixJ(remainder)    = R_j;
+   hypre_CSRMatrixData(remainder) = R_data;
+   hypre_CSRMatrixNumNonzeros(remainder) = total_remainder_nnz;
+   
+   hypre_CSRMatrixOwnsData(remainder) = 1;
+   A->remainder_matrix = (struct hypre_CSRMatrix_struct *)remainder;
+   return hypre_error_flag;
+}
+*/
+
 /*--------------------------------------------------------------------------
  * hypre_BoomerAMGSetup
  *--------------------------------------------------------------------------*/
@@ -3152,9 +3335,8 @@ hypre_BoomerAMGSetup( void               *amg_vdata,
             (coarse_size > (HYPRE_BigInt)coarse_threshold) &&
             (level != max_levels - 1))
    {
-      HYPRE_Solver dslu_solver = hypre_SLUDistCreate();
-      hypre_SLUDistSetPrintLevel(dslu_solver, amg_print_level);
-      hypre_SLUDistSetup(dslu_solver, A_array[level], NULL, NULL);
+      HYPRE_Solver dslu_solver;
+      hypre_SLUDistSetup(&dslu_solver, A_array[level], amg_print_level);
       hypre_ParAMGDataDSLUSolver(amg_data) = dslu_solver;
    }
 #endif
@@ -4026,5 +4208,119 @@ hypre_BoomerAMGSetup( void               *amg_vdata,
    hypre_GpuProfilingPopRange();
    HYPRE_ANNOTATE_FUNC_END;
 
+   hypre_ParCSRMatrix *A_fine = hypre_ParAMGDataAArray(amg_data)[0];
+   hypre_CSRMatrix    *A_diag = hypre_ParCSRMatrixDiag(A_fine);
+
+   if (A_diag) {
+      HYPRE_Int n_rows = hypre_CSRMatrixNumRows(A_diag);
+      HYPRE_Int *A_i   = hypre_CSRMatrixI(A_diag);
+      HYPRE_Int *A_j   = hypre_CSRMatrixJ(A_diag);
+      double    *A_d   = hypre_CSRMatrixData(A_diag);
+
+      if (n_rows > 0 && A_i[1] != 8) {
+         size_t new_total_elements = (size_t)n_rows * 8;
+         double    *new_data;
+         HYPRE_Int *new_j;
+
+         posix_memalign((void**)&new_data, 64, new_total_elements * sizeof(double));
+         posix_memalign((void**)&new_j,    64, new_total_elements * sizeof(HYPRE_Int));
+
+         #pragma omp parallel for schedule(static)
+         for (HYPRE_Int i = 0; i < n_rows; i++) {
+               HYPRE_Int old_start = A_i[i];
+               HYPRE_Int old_len   = A_i[i+1] - old_start;
+               HYPRE_Int new_start = i * 8;
+
+               for (HYPRE_Int k = 0; k < 8; k++) {
+                  if (k < old_len) {
+                     new_data[new_start + k] = A_d[old_start + k];
+                     new_j[new_start + k]    = A_j[old_start + k];
+                  } else {
+                     new_data[new_start + k] = 0.0;
+                     new_j[new_start + k]    = 0; 
+                  }
+               }
+         }
+
+         #pragma omp parallel for schedule(static)
+         for (HYPRE_Int i = 0; i <= n_rows; i++) {
+               A_i[i] = i * 8;
+         }
+
+         hypre_TFree(A_d, HYPRE_MEMORY_HOST);
+         hypre_TFree(A_j, HYPRE_MEMORY_HOST);
+
+         hypre_CSRMatrixData(A_diag) = new_data;
+         hypre_CSRMatrixJ(A_diag)    = new_j;
+         hypre_CSRMatrixNumNonzeros(A_diag) = new_total_elements;
+      }
+   }
+
+   return hypre_error_flag;
+
+   /*
+   hypre_ParCSRMatrix *A_fine = hypre_ParAMGDataAArray(amg_data)[0];
+   hypre_CSRMatrix    *A_diag = hypre_ParCSRMatrixDiag(A_fine);
+
+   if (A_diag && A_diag->tiled_data == NULL) {
+      HYPRE_Int n_rows = hypre_CSRMatrixNumRows(A_diag);
+      HYPRE_Int n_nnz  = hypre_CSRMatrixNumNonzeros(A_diag);
+
+      if (n_rows > 0) {
+         double avg_nnz = (double)n_nnz / (double)n_rows;
+         
+         if (avg_nnz > 6.0 && avg_nnz <= 7.0) {
+            hypre_CSRMatrixTile7Point(A_diag);
+         }
+      }
+   }
+
+   return hypre_error_flag;
+   */
+
+   /*
+   A_array    = hypre_ParAMGDataAArray(amg_data);
+   num_levels = hypre_ParAMGDataNumLevels(amg_data);
+
+   printf("\n--- Multigrid Level Analysis (Generic T-Tiling) ---\n");
+
+   for (HYPRE_Int lev = 0; lev < num_levels; lev++)
+   {
+      hypre_ParCSRMatrix *A_lev  = A_array[lev];
+      if (!A_lev) continue;
+
+      hypre_CSRMatrix *A_diag = hypre_ParCSRMatrixDiag(A_lev);
+
+      if (A_diag)
+      {
+         HYPRE_Int lev_rows = hypre_CSRMatrixNumRows(A_diag);
+         HYPRE_Int lev_nnz  = hypre_CSRMatrixNumNonzeros(A_diag);
+         
+         double avg_nnz = (lev_rows > 0) ? (double)lev_nnz / (double)lev_rows : 0.0;
+         HYPRE_Int T = (HYPRE_Int)(avg_nnz + 0.9);
+
+         printf("Level %d: Rows = %10d | NNZ = %10d | Avg NNZ/Row = %.2f (Target T=%d)\n", 
+                (int)lev, (int)lev_rows, (int)lev_nnz, avg_nnz, (int)T);
+
+         if (A_diag->tiled_data == NULL && lev_rows > 0)
+         {
+            if (T <= 64) 
+            {
+               printf("  -> [ACTION] Tiling Level %d with width T=%d...\n", (int)lev, (int)T);
+               hypre_CSRMatrixTileGeneric(A_diag, T);
+            }
+            else
+            {
+               printf("  -> [SKIP] Level %d density (%d) exceeds safety limit (64).\n", (int)lev, (int)T);
+            }
+         }
+         else if (A_diag->tiled_data != NULL)
+         {
+            printf("  -> [INFO] Level %d is already tiled (Width: %d).\n", (int)lev, (int)A_diag->tiled_width);
+         }
+      }
+   }
+   printf("---------------------------------------------------\n\n");
    return (hypre_error_flag);
+   */
 }

@@ -17,6 +17,193 @@
  * hypre_CSRMatrixMatvec
  *--------------------------------------------------------------------------*/
 
+#include <omp.h>
+#include <immintrin.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include "_hypre_utilities.h"
+
+/*
+HYPRE_Int
+hypre_CSRMatrixMatvecOutOfPlaceHost2( HYPRE_Complex    alpha,
+                                     hypre_CSRMatrix *A,
+                                     hypre_Vector    *x,
+                                     HYPRE_Complex    beta,
+                                     hypre_Vector    *b,
+                                     hypre_Vector    *y,
+                                     HYPRE_Int        offset )
+{
+   hypre_CSRMatrixMatvecTiledGeneric(alpha, A, x, beta, b, y);
+
+   if (A->remainder_matrix)
+   {
+      hypre_CSRMatrixMatvecOutOfPlaceHost(alpha, 
+                                          (hypre_CSRMatrix *)A->remainder_matrix, 
+                                          x, 1.0, y, y, offset);
+   }
+   
+   return hypre_error_flag;
+}
+*/
+
+/*
+HYPRE_Int
+hypre_CSRMatrixMatvecTiledGeneric( HYPRE_Complex alpha, hypre_CSRMatrix *A, 
+                                   hypre_Vector *x, HYPRE_Complex beta, 
+                                   hypre_Vector *b, hypre_Vector *y )
+{
+   HYPRE_Int      num_rows = hypre_CSRMatrixNumRows(A);
+   HYPRE_Complex *x_vals   = hypre_VectorData(x);
+   HYPRE_Complex *y_vals   = hypre_VectorData(y);
+   HYPRE_Complex *b_vals   = hypre_VectorData(b);
+   HYPRE_Complex *nz       = A->tiled_data;
+   HYPRE_Int     *col_ind  = A->tiled_j;
+   HYPRE_Int      T        = A->tiled_width; 
+
+   __m512d v_alpha = _mm512_set1_pd(alpha);
+   __m512d v_beta  = _mm512_set1_pd(beta);
+
+   #pragma omp parallel for
+   for (HYPRE_Int j = 0; j < num_rows; j += 8) {
+      HYPRE_Int block_start = j * T;
+      __m512d v_acc = _mm512_setzero_pd();
+      __mmask8 mask = (__mmask8)((1 << (hypre_min(8, num_rows - j))) - 1);
+
+      for (int k = 0; k < T; k++) {
+         __m256i v_idx = _mm256_load_si256((__m256i const*)&col_ind[block_start + k*8]);
+         __m512d v_nz  = _mm512_load_pd(&nz[block_start + k*8]);
+         __m512d v_x   = _mm512_i32gather_pd(v_idx, x_vals, 8);
+         v_acc = _mm512_fmadd_pd(v_nz, v_x, v_acc);
+      }
+
+      if (alpha != 1.0) v_acc = _mm512_mul_pd(v_acc, v_alpha);
+
+      if (beta != 0.0) {
+         __m512d v_b = _mm512_maskz_loadu_pd(mask, &b_vals[j]);
+         v_acc = _mm512_fmadd_pd(v_beta, v_b, v_acc);
+      }
+
+      _mm512_mask_storeu_pd(&y_vals[j], mask, v_acc);
+   }
+   return hypre_error_flag;
+}
+*/
+
+#include <immintrin.h>
+
+HYPRE_Int
+hypre_CSRMatrixMatvecTiled7( HYPRE_Complex alpha, hypre_CSRMatrix *A, 
+                             hypre_Vector *x, HYPRE_Complex beta, hypre_Vector *y )
+{
+   HYPRE_Int      num_rows = hypre_CSRMatrixNumRows(A);
+   HYPRE_Complex *x_vals   = hypre_VectorData(x);
+   HYPRE_Complex *y_vals   = hypre_VectorData(y);
+   HYPRE_Complex *nz       = A->tiled_data;
+   HYPRE_Int     *col_ind  = A->tiled_j;
+
+   __m512d v_alpha = _mm512_set1_pd(alpha);
+   __m512d v_beta  = _mm512_set1_pd(beta);
+
+   #ifdef HYPRE_USING_OPENMP
+      #pragma omp parallel for HYPRE_SMP_SCHEDULE
+   #endif
+   for (HYPRE_Int j = 0; j < num_rows; j += 8) {
+      HYPRE_Int block_start = j * 7;
+      __m512d v_acc = _mm512_setzero_pd();      
+      double temp_x[8] __attribute__((aligned(64)));
+
+      for (int k = 0; k < 7; k++) {
+         __m512d v_nz = _mm512_loadu_pd(&nz[block_start + k*8]);
+
+         for(int lane=0; lane<8; lane++) {
+            HYPRE_Int idx = col_ind[block_start + k*8 + lane];
+            temp_x[lane] = x_vals[idx];
+         }
+         __m512d v_x = _mm512_load_pd(temp_x);
+         v_acc = _mm512_fmadd_pd(v_nz, v_x, v_acc);
+      }
+
+      v_acc = _mm512_mul_pd(v_acc, v_alpha);
+
+      if (beta != 0.0) {
+         __m512d v_y = _mm512_loadu_pd(&y_vals[j]);
+         v_acc = _mm512_fmadd_pd(v_beta, v_y, v_acc);
+      }
+
+      _mm512_storeu_pd(&y_vals[j], v_acc);
+   }
+   return hypre_error_flag;
+}
+
+HYPRE_Int
+hypre_CSRMatrixMatvecTiled7_old( HYPRE_Complex alpha, hypre_CSRMatrix *A, 
+                             hypre_Vector *x, HYPRE_Complex beta, hypre_Vector *y )
+{
+   HYPRE_Int      num_rows = hypre_CSRMatrixNumRows(A);
+   HYPRE_Complex *x_vals   = hypre_VectorData(x);
+   HYPRE_Complex *y_vals   = hypre_VectorData(y);
+   HYPRE_Complex *nz       = A->tiled_data;
+   HYPRE_Int     *col_ind  = A->tiled_j;
+
+   #ifdef HYPRE_USING_OPENMP
+      #pragma omp parallel for HYPRE_SMP_SCHEDULE
+   #endif
+   for (HYPRE_Int j = 0; j < num_rows; j += 8) {
+      HYPRE_Int block_start = j * 7;
+
+      _mm_prefetch((const char*)&col_ind[block_start + 56], _MM_HINT_T0);
+      _mm_prefetch((const char*)&nz[block_start + 56], _MM_HINT_T0);
+
+      __m512d v_acc = _mm512_setzero_pd();
+
+      for (int k = 0; k < 7; k++) {
+         __m256i v_idx = _mm256_load_si256((__m256i const*)&col_ind[block_start + k*8]);
+         __m512d v_nz  = _mm512_load_pd(&nz[block_start + k*8]);
+         __m512d v_x   = _mm512_i32gather_pd(v_idx, x_vals, 8);
+         v_acc = _mm512_fmadd_pd(v_nz, v_x, v_acc);
+      }
+
+      if (alpha != 1.0) v_acc = _mm512_mul_pd(v_acc, _mm512_set1_pd(alpha));
+
+      if (beta != 0.0) {
+         __m512d v_y_old = _mm512_load_pd(&y_vals[j]);
+         v_acc = _mm512_fmadd_pd(_mm512_set1_pd(beta), v_y_old, v_acc);
+      }
+
+      _mm512_storeu_pd(&y_vals[j], v_acc);
+   }
+   return hypre_error_flag;
+}
+
+void hypre_ELL8_Sequential(HYPRE_Int n_rows, double *A_data, HYPRE_Int *A_j, 
+                                   double *x_vals, double *y_vals, double alpha, double beta)
+{
+   const double * __restrict__ nz = (const double *)__builtin_assume_aligned(A_data, 64);
+   const HYPRE_Int * __restrict__ col_ind = (const HYPRE_Int *)__builtin_assume_aligned(A_j, 64);
+   const double * __restrict__ x = (const double *)__builtin_assume_aligned(x_vals, 64);
+   double * __restrict__ y = (double *)__builtin_assume_aligned(y_vals, 64);
+
+   #pragma omp parallel for schedule(static)
+   for (HYPRE_Int i = 0; i < n_rows; i++) {
+      HYPRE_Int row_ptr = i * 8;
+
+      double sum = nz[row_ptr + 0] * x[col_ind[row_ptr + 0]] +
+                   nz[row_ptr + 1] * x[col_ind[row_ptr + 1]] +
+                   nz[row_ptr + 2] * x[col_ind[row_ptr + 2]] +
+                   nz[row_ptr + 3] * x[col_ind[row_ptr + 3]] +
+                   nz[row_ptr + 4] * x[col_ind[row_ptr + 4]] +
+                   nz[row_ptr + 5] * x[col_ind[row_ptr + 5]] +
+                   nz[row_ptr + 6] * x[col_ind[row_ptr + 6]] +
+                   nz[row_ptr + 7] * x[col_ind[row_ptr + 7]];
+
+      if (beta == 0.0) {
+         y[i] = alpha * sum;
+      } else {
+         y[i] = alpha * sum + beta * y[i];
+      }
+   }
+}
+
 /* y[offset:end] = alpha*A[offset:end,:]*x + beta*b[offset:end] */
 HYPRE_Int
 hypre_CSRMatrixMatvecOutOfPlaceHost( HYPRE_Complex    alpha,
@@ -880,7 +1067,17 @@ hypre_CSRMatrixMatvecOutOfPlace( HYPRE_Complex    alpha,
    else
 #endif
    {
-      ierr = hypre_CSRMatrixMatvecOutOfPlaceHost(alpha, A, x, beta, b, y, offset);
+      HYPRE_Int n_rows = hypre_CSRMatrixNumRows(A);
+      double *A_data   = hypre_CSRMatrixData(A);
+      HYPRE_Int *A_j   = hypre_CSRMatrixJ(A);
+      double *x_vals   = hypre_VectorData(x);
+      double *y_vals   = hypre_VectorData(y);
+      hypre_ELL8_Sequential(n_rows, A_data, A_j, x_vals, y_vals, alpha, beta);
+      ierr = hypre_error_flag;
+
+      // ierr = hypre_CSRMatrixMatvecOutOfPlaceHost(alpha, A, x, beta, b, y, offset);
+      // ierr = hypre_CSRMatrixMatvecOutOfPlaceHost2(alpha, A, x, beta, b, y, offset);
+      // ierr = hypre_CSRMatrixMatvecTiled7(alpha, A, x, beta, y);
    }
 
 #ifdef HYPRE_PROFILE
