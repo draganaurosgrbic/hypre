@@ -1077,7 +1077,7 @@ hypre_CSRMatrixMatvecOutOfPlace( HYPRE_Complex    alpha,
 
       // ierr = hypre_CSRMatrixMatvecOutOfPlaceHost(alpha, A, x, beta, b, y, offset);
       // ierr = hypre_CSRMatrixMatvecOutOfPlaceHost2(alpha, A, x, beta, b, y, offset);
-      // ierr = hypre_CSRMatrixMatvecTiled7(alpha, A, x, beta, y);
+      // ierr = hypre_CSRMatrixMatvecTiled7_old(alpha, A, x, beta, y);
    }
 
 #ifdef HYPRE_PROFILE

@@ -4204,6 +4204,7 @@ hypre_BoomerAMGSetup( void               *amg_vdata,
    }
 #endif
 
+
    hypre_MemoryPrintUsage(comm, hypre_HandleLogLevel(hypre_handle()), "BoomerAMG setup end  ", 0);
    hypre_GpuProfilingPopRange();
    HYPRE_ANNOTATE_FUNC_END;
@@ -4257,6 +4258,7 @@ hypre_BoomerAMGSetup( void               *amg_vdata,
    }
 
    return hypre_error_flag;
+   
 
    /*
    hypre_ParCSRMatrix *A_fine = hypre_ParAMGDataAArray(amg_data)[0];
@@ -4270,7 +4272,7 @@ hypre_BoomerAMGSetup( void               *amg_vdata,
          double avg_nnz = (double)n_nnz / (double)n_rows;
          
          if (avg_nnz > 6.0 && avg_nnz <= 7.0) {
-            hypre_CSRMatrixTile7Point(A_diag);
+            hypre_CSRMatrixTile7Point_old(A_diag);
          }
       }
    }

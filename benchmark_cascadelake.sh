@@ -8,8 +8,10 @@
 #SBATCH --cpus-per-task=80
 #SBATCH --time=04:00:00
 
+export PATH="/scratch/dg76/bin:$PATH"
+
 THREADS=(1 2 4 8 12 16 20 24 32 40)
-SIZES=("80" "100" "160" "200")
+SIZES=("80" "100" "160" "200" "250")
 
 lscpu
 
