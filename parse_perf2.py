@@ -3,11 +3,24 @@ import re
 import sys
 import os
 
+def get_total_duration(data_file):
+    try:
+        command = ['perf', 'report', '-i', data_file, '--header', '--stdio']
+        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        
+        match = re.search(r"duration\s+:\s+([0-9.]+)\s+ms", result.stdout)
+        if match:
+            return float(match.group(1)) / 1000.0
+    except Exception:
+        pass
+    return None
+
 def get_perf_stats(target_prefix, data_file):
     if not os.path.exists(data_file):
         print(f"Error: Data file '{data_file}' not found.")
         return False
 
+    total_seconds = get_total_duration(data_file)
     command = ['perf', 'report', '-i', data_file, '--stdio', '--group', '--no-children']
     
     try:
@@ -27,21 +40,27 @@ def get_perf_stats(target_prefix, data_file):
                 print(f"\nResults for: {symbol}")
                 print(f"Source file: {data_file}")
                 print("-" * 50)
-                print(f"Task-Clock:    {t_clock:>6}% (Time Share)")
-                print(f"Cycles:        {cycles:>6}%")
-                print(f"Instructions:  {instr:>6}%")
-                print(f"L1 Misses:     {l1:>6}%")
-                print(f"LLC Misses:    {llc:>6}%")
+                print(f"Task-Clock:    {t_clock:>7}% (Time Share)")
+                
+                if total_seconds:
+                    kernel_time = total_seconds * (float(t_clock) / 100.0)
+                    print(f"Kernel Time:   {kernel_time:>10.4f} seconds")
+                    print(f"Total Runtime: {total_seconds:>10.4f} seconds")
+
+                print(f"Cycles:        {cycles:>7}%")
+                print(f"Instructions:  {instr:>7}%")
+                print(f"L1 Misses:     {l1:>7}%")
+                print(f"LLC Misses:    {llc:>7}%")
                 
                 try:
                     c_val = float(cycles)
                     t_val = float(t_clock)
                     if t_val > 0:
                         intensity = c_val / t_val
-                        print(f"Cycle/Clock Intensity: {intensity:>6.2f}")
+                        print(f"Cycle/Clock Intensity: {intensity:>7.2f}")
                     
                     rel_ipc = float(instr) / c_val if c_val > 0 else 0
-                    print(f"Relative IPC:          {rel_ipc:>6.2f}")
+                    print(f"Relative IPC:          {rel_ipc:>7.2f}")
                 except:
                     pass
                 return True

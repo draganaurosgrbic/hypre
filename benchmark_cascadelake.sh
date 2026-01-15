@@ -10,8 +10,8 @@
 
 export PATH="/scratch/dg76/bin:$PATH"
 
-THREADS=(1 2 4 8 12 16 20 24 32 40)
-SIZES=("80" "100" "160" "200" "250")
+THREADS=(1 2 3 4 6 8 12 16 24 32)
+SIZES=("80" "100" "120" "160" "200" "250")
 
 lscpu
 
@@ -20,7 +20,7 @@ MATRIX_BASE_PATH="/scratch/dg76/thesis_work/total/hypre-2/data"
 for sz in "${SIZES[@]}"; do    
     for t in "${THREADS[@]}"; do
         export OMP_NUM_THREADS=$t
-        if [ $t -gt 24 ]; then export OMP_PROC_BIND=spread; else export OMP_PROC_BIND=close; fi
+        export OMP_PROC_BIND=close
 
         JOB_ID=${SLURM_JOB_ID:-"pid_$$"}
         EXEC1="/scratch/dg76/thesis_work/total/hypredrive-1/build/hypredrive"
