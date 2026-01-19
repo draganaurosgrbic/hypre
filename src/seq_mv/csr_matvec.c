@@ -175,6 +175,8 @@ hypre_CSRMatrixMatvecTiled7_old( HYPRE_Complex alpha, hypre_CSRMatrix *A,
    return hypre_error_flag;
 }
 
+#include <stdio.h>
+
 void hypre_ELL8_Sequential(HYPRE_Int n_rows, double *A_data, HYPRE_Int *A_j, 
                                    double *x_vals, double *y_vals, double alpha, double beta)
 {
@@ -183,25 +185,42 @@ void hypre_ELL8_Sequential(HYPRE_Int n_rows, double *A_data, HYPRE_Int *A_j,
    const double * __restrict__ x = (const double *)__builtin_assume_aligned(x_vals, 64);
    double * __restrict__ y = (double *)__builtin_assume_aligned(y_vals, 64);
 
-   #pragma omp parallel for schedule(static)
-   for (HYPRE_Int i = 0; i < n_rows; i++) {
-      HYPRE_Int row_ptr = i * 8;
+   if (alpha == 1 && beta == 0) {
+      #pragma omp parallel for schedule(static)
+      for (HYPRE_Int i = 0; i < n_rows; i++) {
+         HYPRE_Int row_ptr = i * 8;
 
-      double sum = nz[row_ptr + 0] * x[col_ind[row_ptr + 0]] +
-                   nz[row_ptr + 1] * x[col_ind[row_ptr + 1]] +
-                   nz[row_ptr + 2] * x[col_ind[row_ptr + 2]] +
-                   nz[row_ptr + 3] * x[col_ind[row_ptr + 3]] +
-                   nz[row_ptr + 4] * x[col_ind[row_ptr + 4]] +
-                   nz[row_ptr + 5] * x[col_ind[row_ptr + 5]] +
-                   nz[row_ptr + 6] * x[col_ind[row_ptr + 6]] +
-                   nz[row_ptr + 7] * x[col_ind[row_ptr + 7]];
+         y[i] = nz[row_ptr + 0] * x[col_ind[row_ptr + 0]] +
+                     nz[row_ptr + 1] * x[col_ind[row_ptr + 1]] +
+                     nz[row_ptr + 2] * x[col_ind[row_ptr + 2]] +
+                     nz[row_ptr + 3] * x[col_ind[row_ptr + 3]] +
+                     nz[row_ptr + 4] * x[col_ind[row_ptr + 4]] +
+                     nz[row_ptr + 5] * x[col_ind[row_ptr + 5]] +
+                     nz[row_ptr + 6] * x[col_ind[row_ptr + 6]] +
+                     nz[row_ptr + 7] * x[col_ind[row_ptr + 7]];
+      }
+   } else {
+      #pragma omp parallel for schedule(static)
+      for (HYPRE_Int i = 0; i < n_rows; i++) {
+         HYPRE_Int row_ptr = i * 8;
 
-      if (beta == 0.0) {
-         y[i] = alpha * sum;
-      } else {
-         y[i] = alpha * sum + beta * y[i];
+         double sum = nz[row_ptr + 0] * x[col_ind[row_ptr + 0]] +
+                     nz[row_ptr + 1] * x[col_ind[row_ptr + 1]] +
+                     nz[row_ptr + 2] * x[col_ind[row_ptr + 2]] +
+                     nz[row_ptr + 3] * x[col_ind[row_ptr + 3]] +
+                     nz[row_ptr + 4] * x[col_ind[row_ptr + 4]] +
+                     nz[row_ptr + 5] * x[col_ind[row_ptr + 5]] +
+                     nz[row_ptr + 6] * x[col_ind[row_ptr + 6]] +
+                     nz[row_ptr + 7] * x[col_ind[row_ptr + 7]];
+
+         if (beta == 0.0) {
+            y[i] = alpha * sum;
+         } else {
+            y[i] = alpha * sum + beta * y[i];
+         }
       }
    }
+
 }
 
 /* y[offset:end] = alpha*A[offset:end,:]*x + beta*b[offset:end] */
