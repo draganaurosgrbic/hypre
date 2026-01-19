@@ -177,6 +177,43 @@ hypre_CSRMatrixMatvecTiled7_old( HYPRE_Complex alpha, hypre_CSRMatrix *A,
 
 #include <stdio.h>
 
+void hypre_ELL8_Sequential_vectorized(HYPRE_Int n_rows, double *A_data, HYPRE_Int *A_j, 
+                           double *x_vals, double *y_vals, double alpha, double beta)
+{
+   const double * __restrict__ nz = (const double *)__builtin_assume_aligned(A_data, 64);
+   const HYPRE_Int * __restrict__ col_ind = (const HYPRE_Int *)__builtin_assume_aligned(A_j, 64);
+   const double * __restrict__ x = (const double *)__builtin_assume_aligned(x_vals, 64);
+   double * __restrict__ y = (double *)__builtin_assume_aligned(y_vals, 64);
+
+   if (alpha == 1.0 && beta == 0.0) {
+      #pragma omp parallel for schedule(static)
+      for (HYPRE_Int i = 0; i < n_rows; i++) {
+         __m256i v_col = _mm256_load_si256((__m256i *)&col_ind[i * 8]);
+         __m512d v_nz  = _mm512_load_pd(&nz[i * 8]);
+         __m512d v_x   = _mm512_i32gather_pd(v_col, x, 8);
+         y[i] = _mm512_reduce_add_pd(_mm512_mul_pd(v_nz, v_x));
+      }
+   } else {
+      __m512d v_alpha = _mm512_set1_pd(alpha);
+      __m512d v_beta  = _mm512_set1_pd(beta);
+
+      #pragma omp parallel for schedule(static)
+      for (HYPRE_Int i = 0; i < n_rows; i++) {
+         __m256i v_col = _mm256_load_si256((__m256i *)&col_ind[i * 8]);
+         __m512d v_nz  = _mm512_load_pd(&nz[i * 8]);
+         __m512d v_x   = _mm512_i32gather_pd(v_col, x, 8);
+         
+         double sum = _mm512_reduce_add_pd(_mm512_mul_pd(v_nz, v_x));
+
+         if (beta == 0.0) {
+            y[i] = alpha * sum;
+         } else {
+            y[i] = alpha * sum + beta * y[i];
+         }
+      }
+   }
+}
+
 void hypre_ELL8_Sequential(HYPRE_Int n_rows, double *A_data, HYPRE_Int *A_j, 
                                    double *x_vals, double *y_vals, double alpha, double beta)
 {
