@@ -2,8 +2,8 @@ general:
   use_millisec: off
 
 linear_system:
-  matrix_filename:  /home/l1129498/work/thesis_work/total/hypre-2/data/A_120
-  rhs_filename:     /home/l1129498/work/thesis_work/total/hypre-2/data/b_120
+  matrix_filename:  /scratch/dg76/thesis_work/total/hypre-2/data/A_120
+  rhs_filename:     /scratch/dg76/thesis_work/total/hypre-2/data/b_120
 
 solver:
   pcg:
